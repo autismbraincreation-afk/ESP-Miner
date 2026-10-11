@@ -1,16 +1,16 @@
 #include <sys/time.h>
 #include <limits.h>
 
-#include "work_queue.h"
-#include "global_state.h"
+#include "../work_queue.h"
+#include "../global_state.h"
 #include "esp_log.h"
 #include "esp_system.h"
-#include "mining.h"
+#include "../mining.h"
 #include "string.h"
 #include "esp_timer.h"
 
-#include "asic.h"
-#include "system.h"
+#include "../asic.h"
+#include "../system.h"
 #include "esp_heap_caps.h"
 #include "sv2_protocol.h"
 #include "stratum_api.h"
@@ -50,7 +50,6 @@ void create_jobs_task(void *pvParameters)
     stratum_protocol_t current_work_protocol = GLOBAL_STATE->stratum_protocol;
     int timeout_ms = ASIC_get_asic_job_frequency_ms(GLOBAL_STATE);
 
-    // En son ASIC'e gönderilen işin ID'sini takip eden hafıza
     static char last_dispatched_job_v1[64] = {0};
     static uint32_t last_dispatched_job_sv2 = UINT32_MAX;
 
@@ -62,7 +61,6 @@ void create_jobs_task(void *pvParameters)
             GLOBAL_STATE->reset_extranonce2 = false;
         }
 
-        // Protokol değişim kontrolü
         stratum_protocol_t active_protocol = GLOBAL_STATE->stratum_protocol;
         if (active_protocol != current_work_protocol) {
             if (current_work != NULL) {
@@ -84,7 +82,6 @@ void create_jobs_task(void *pvParameters)
         if (new_work != NULL) {
             active_protocol = GLOBAL_STATE->stratum_protocol;
 
-            // Önceki işi bellekten temizle
             free_work_item(GLOBAL_STATE, current_work, current_work_protocol);
             current_work = NULL;
 
@@ -98,7 +95,6 @@ void create_jobs_task(void *pvParameters)
 
             current_work = new_work;
 
-            // Loglama ve İş ID Takibi
             bool is_new_job_id = false;
             bool clean = false;
 
@@ -130,7 +126,6 @@ void create_jobs_task(void *pvParameters)
                 }
             }
 
-            // Zorluk ve Version Rolling güncellemeleri
             if (GLOBAL_STATE->new_set_mining_difficulty_msg) {
                 ESP_LOGI(TAG, "New pool difficulty %.2f", GLOBAL_STATE->pool_difficulty);
                 difficulty = GLOBAL_STATE->pool_difficulty;
@@ -143,23 +138,18 @@ void create_jobs_task(void *pvParameters)
                 GLOBAL_STATE->new_stratum_version_rolling_msg = false;
             }
 
-            // Eğer iş ID'si YENİYSE, clean_jobs false olsa bile ASIC'e GÖNDER!
             if (!is_new_job_id && !clean) {
                 continue;
             }
 
         } else {
-            // Kuyruk boşaldı (timeout oldu) - Mevcut işi dinamik extranonce2 artışıyla tekrar gönder
             if (current_work == NULL) {
                 vTaskDelay(100 / portTICK_PERIOD_MS);
                 continue;
             }
-            // Timeout süresinde aynı işi yeni extranonce2 değeriyle döngüye sokabiliriz
-            // veya donanımın version rolling yapmasına izin verebiliriz.
             timeout_ms = ASIC_get_asic_job_frequency_ms(GLOBAL_STATE);
         }
 
-        // Son protokol kontrolü
         active_protocol = GLOBAL_STATE->stratum_protocol;
         if (active_protocol != current_work_protocol) {
             free_work_item(GLOBAL_STATE, current_work, current_work_protocol);
@@ -169,7 +159,6 @@ void create_jobs_task(void *pvParameters)
             continue;
         }
 
-        // ASIC'e işi gönder (extranonce 2 artık dinamik olarak artırılıyor)
         if (active_protocol == STRATUM_PROTOCOL_V2) {
             if (stratum_v2_is_extended_channel(GLOBAL_STATE)) {
                 generate_work_sv2_ext(GLOBAL_STATE, (sv2_ext_job_t *)current_work, difficulty);
@@ -191,14 +180,12 @@ static void generate_work(GlobalState *GLOBAL_STATE, mining_notify *notification
         return;
     }
 
-    // Dinamik olarak artan extranonce 2 sayacı (Rolling Extranonce 2)
     static uint32_t local_en2_counter = 0;
     local_en2_counter++;
 
     char extranonce_2_str[MAX_EXTRANONCE2_STR];
     int en2_hex_len = GLOBAL_STATE->extranonce_2_len * 2;
     
-    // Güvenli sınır kontrolü (örn. 32 karakteri geçmesin)
     if (en2_hex_len > MAX_EXTRANONCE2_STR - 1) {
         en2_hex_len = MAX_EXTRANONCE2_STR - 1;
     }
@@ -317,7 +304,6 @@ static void generate_work_sv2_ext(GlobalState *GLOBAL_STATE, sv2_ext_job_t *ext_
     uint8_t extranonce_2[32];
     memset(extranonce_2, 0, sizeof(extranonce_2));
 
-    // Dinamik extranonce 2 doldurma (SV2 extended channels için)
     static uint32_t local_sv2_en2_counter = 0;
     local_sv2_en2_counter++;
     
